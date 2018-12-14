@@ -1,0 +1,71 @@
+\documentclass{article}
+\usepackage{amsmath}
+
+\begin{document}
+
+\title{Lecture Notes 2.15.2018}
+\author{Neal Marquez}
+\date{February 15, 2018}
+\maketitle
+
+\section{Density Filtering}
+
+Lets assume a sitaution where data arrives sequentially up to an instant $t$.
+
+\begin{flalign*}
+  y_1, \dots , y_2 , \dots &~~~ \text{data arrives sequentially}\\
+  \mathcal{D}_t = \{ y_1 \dots y_t\} &~~~ \text{up to an instant } t\\
+  \underbrace{p(x | \mathcal{D}_{t+1}) \propto p(y_{t+1} | x) \times p(x|\mathcal{D})}_{\text{Bayesian Updating}}
+      &~~~ \text{When } y_{t+1} \text{ comes to us} \\
+  p(x | \mathcal{D}_{t+1}) &~~~ \text{Update the posterior}  \\
+  \underset{q \in \mathcal{F}}{\operatorname{Min}} ~\text{KL}\Big(p(x | \mathcal{D}_{t+1}) || q_\theta^{(t)}(x) \Big)
+\end{flalign*}
+
+\subsection{Assumed Density Filtering Algorithm}
+
+\begin{flalign*}
+  \text{Set} ~~~& q_\theta^{(0)}(x) = p_0(x)\\
+  \text{Update} ~~~& p(x|\mathcal{D}_{t+1}) =
+      \frac{p(y_{t+1}|x)q_\theta^{(t)}(x)}{\int p(y_{t+1}|x)q_\theta^{(t)}(x) dx}\\
+  \text{Project} ~~~& q_\theta^{(t+1)}(x) = \underset{q \in \mathcal{F}}{\operatorname{Min}}
+      ~\text{KL}\Big(p(x | \mathcal{D}_{t+1}) || q_\theta(x) \Big)\\
+\end{flalign*}
+
+\subsection{Expectation Propogation}
+
+Consider the Bayesian probit classification context.
+
+Probit $y$(binary) from $x$.
+\begin{flalign*}
+  y_t &= \operatorname{sign}(h_w(s_t)) \\
+  p(y_t|w,s_t) &= \frac{1}{2} + \frac{1}{\sqrt{2 \pi}} \int e^{-\frac{u^2}{2}} du \\
+  p(w|y_{t+1}, s_{t+1}) &\propto p(y_{t+1} | w,s_{t+1}) \\
+  p_t(w) &\propto \operatorname{exp}(-\frac{1}{2} |w|^2)^q_\theta(w) \\
+  p(x|y) &= \frac{p_0(x) \prod_{\ell=1}^{m}p(y_\ell | x)}{\int p_0(x) \prod_{\ell=1}^{m}p(y_\ell | x) dx} \\
+  &= \frac{1}{Z} f_0(x) \prod_{\ell=1}^{m} f_\ell (x)
+\end{flalign*}
+
+\subsection{Expectation Propogation Applied}
+
+Computing
+$$
+q(x) = \frac{1}{Z} f_0(x) \prod_{\ell=1}^{m} g_\ell (x)
+$$
+using assumed density filtering.
+
+\begin{flalign*}
+  \text{Init} &~~~ q(x) = f_0(x) ~~~ (f_0 \text{ prior from exponential family}) \\
+  &~~~ q_\ell (x) = 1 ~~\text{for}~\ell=1 \dots m \\
+  \text{Iterate} &~~~ \text{picking } \ell \in \{1 \dots m\} \text{ at random} \\
+  &~~~ \underset{\text{remove}}{\text{"   "}} ~ g_\ell(x) \text{ compute }
+       q_{`\ell} \propto \underbrace{\frac{q(x)}{g_\ell(x)}}_{\underset{q_\ell \in \mathcal{F}}{\text{tilted distribution}}} \\
+  \text{Update} &~~~ q_\ell(x) = f_\ell (x) q_{`\ell} (x) \\
+  \text{Project} &~~~ q_\ell (x) = \underset{q \in \mathcal{F}}{\operatorname{argmin}}
+      \text{ KL}\Big( q_\ell(x) || q(x) \Big) \\
+  \text{Project} &~~~ q_\ell(x) = \frac{q`(x)}{q_{`\ell} (x)} \propto
+      \frac{q`(x)}{q(x)} g_\ell (x)
+\end{flalign*}
+
+Where $q(x)$ is normalized with respect to $Z$.
+
+\end{document}

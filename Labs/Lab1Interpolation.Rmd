@@ -1,0 +1,60 @@
+---
+title: "Lab 1"
+author: "Neal Marquez"
+date: "January 16, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+rm(list=ls())
+library(dplyr)
+library(fields)
+library(geoR)
+library(splancs)
+
+# leman data
+load( url(
+  "http://user.math.uzh.ch/furrer/download/sta121/leman83_red.RData"))
+```
+
+```{R}
+plot( y ~ x, col=tim.colors()[cut(Hg,64)], pch=19, data=leman)
+
+lines(lake.data)
+```
+
+```{R KernelCorrelations}
+curve( cov.spatial( x, cov.pars=c(1, .25)), 
+       xlab="distance", ylab=expression(c(h)))
+curve( cov.spatial( x, cov.pars=c(1, .75), cov.model="sph"), add=TRUE, lty=2,col=2)
+curve( cov.spatial(x, cov.pars=c(1, 0.188), kappa=1), add=TRUE, lty=3,col=3)      
+curve( cov.spatial(x, cov.pars=c(1, 0.14), kappa=2), add=TRUE, lty=4,col=4)
+curve( cov.spatial(x, cov.pars=c(1, 0.117), kappa=3), add=TRUE, lty=5,col=5)     
+abline( v=.75, col='gray' )
+legend( "topright", c("exponential", "spherical", "Matern (v=1)",
+                      "Matern (v=2)", "Matern (v=3)"), lty=1:5, col=1:5, bty ='n')
+```
+
+```{R Kriging}
+xr <- seq(min(lake.data[,1]),to=max(lake.data[,1]),l=100)
+yr <- seq(min(lake.data[,2]),to=max(lake.data[,2]),by=xr[2]-xr[1])
+
+locs <- data.frame( x=lake.data[,1], y=lake.data[,2])
+grid <- expand.grid( x=xr, y=yr)
+pts <- pip( grid, locs, bound=TRUE)  # get Point-In-Polygon
+
+#  
+# kriging:
+   
+with( {
+  out <- Krig( cbind(x,y), Hg, theta=6, give.warnings=FALSE)
+  pout <- predict( out, pts) #prediction
+  quilt.plot(pts, pout, nx=length(xr)-2, ny=length(yr)-1, main="Prediction")
+   
+  fit0 <- predict( out, pts,  just.fixed=TRUE) # trend
+  quilt.plot(pts, fit0, nx=length(xr)-2, ny=length(yr)-1, main="Trend")
+   
+  fit1 <- pout - fit0                   # smooth spatial
+  quilt.plot(pts, fit1, nx=length(xr)-2, ny=length(yr)-1, main="Spatial component")
+}, data=leman)
+```

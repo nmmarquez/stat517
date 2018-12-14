@@ -1,0 +1,282 @@
+---
+title: "Take Home Midterm"
+author: "Neal Marquez"
+date: "February 14, 2018"
+output: html_document
+---
+
+## Simple Kringing Setup
+
+For this process we will use simple kriging where we assume a zero mean in our data because it has been processed in such a way that it is now zero meaned. In order to get the estimates for the new points on a grid we can use the equation below which assigns a weight to each observed value in order to predict the new value.
+
+$$
+\hat{S}(x_0)=\sum_{i=1}^{N} \lambda_i x_i \\
+= \boldsymbol{\lambda_0 x} \\
+$$
+
+$\boldsymbol{\lambda_0}$ is derived from a covariance function $C$ such that.
+
+$$
+\boldsymbol{\lambda_0}=
+  \begin{bmatrix}
+    C(x_1, x_1) & \dots & C(x_1, x_n) \\
+    \vdots & \ddots & \vdots \\
+    C(x_n, x_1) & \dots & C(x_n, x_n)
+  \end{bmatrix}^{-1}
+  \begin{bmatrix}
+    C(x_1, x_0) \\
+    \vdots \\
+    C(x_n, x_0)
+  \end{bmatrix}
+$$
+
+Rather than solving a set of weights for a single point we can solve for all points that we wish to predict for using the following formulation predicting for points $x_0 \dots x_m$.
+
+$$
+\boldsymbol{\lambda}=
+  \begin{bmatrix}
+    C(x_1, x_1) & \dots & C(x_1, x_n) \\
+    \vdots & ~ & \vdots \\
+    C(x_n, x_1) & \dots & C(x_n, x_n)
+  \end{bmatrix}^{-1}
+  \begin{bmatrix}
+    C(x_1, x_0) & \dots & C(x_1, x_m)\\
+    \vdots & \ddots & \vdots \\
+    C(x_n, x_m) & \dots & C(x_n, x_m)
+  \end{bmatrix}
+$$
+
+We can estimate the covariance function $C$ using a semivariogram and fitting an exponential function through the data points. Recall that the semivariogram can be estimated at seperate bins with the following form. 
+
+$$
+\gamma(h) = \frac{1}{2N_J} \sum_{i,j \in J(h)}(S(x_i) - S(x_j))^2
+$$
+
+## Libraries
+
+```{r setup, message=FALSE, warning=FALSE}
+rm(list=ls())
+
+library(dplyr)
+library(ggplot2)
+library(geoR)
+library(fields)
+library(kernlab)
+library(sp)
+library(gstat)
+library(RCurl)
+```
+
+## Plot data
+
+```{r }
+load(url("http://faculty.washington.edu/zaid/teaching/2017/stat517/LakeGeneva.RData"))
+leman <- rbind(
+    leman78 %>% mutate(year=78) %>% select(x, y, Cd, year) %>% 
+        mutate(CdDetrend=c(scale(Cd))), 
+    leman83 %>% mutate(year=83) %>% select(x, y, Cd, year) %>% 
+        mutate(CdDetrend=c(scale(Cd))),
+    leman88 %>% mutate(year=88) %>% select(x, y, Cd, year) %>% 
+        mutate(CdDetrend=c(scale(Cd)))) %>% 
+    filter(y < 150 & Cd < 1000) %>% # get rid of extreme outliers
+    mutate(CdDetrend=CdDetrend - min(CdDetrend) + 1) %>%
+    mutate(lCD=log(CdDetrend), cquant=cut(lCD, 64))
+leman_geo <- as.geodata(leman %>% filter(year==88), 1:2, 6)
+leman88 <- leman %>% filter(year==88) %>% 
+    mutate(CdDetrend=CdDetrend - mean(CdDetrend))
+ggplot(leman88, aes(x=x, y=y, fill=CdDetrend)) + geom_tile() +
+    scale_fill_distiller(palette = "Spectral") + 
+    theme_minimal()
+```
+
+## Variogram Estimation Using Hand Made Functions
+
+```{R}
+distfunc <- function(x,y){
+    sqrt(sum((y-x)^2))
+}
+
+distMatFunc <- function(matlike, dfunc=distfunc){
+    locs <- matlike %>% as.matrix %>%
+        apply(1, as.list) %>% lapply(function(x) c(x$x, x$y))
+    distmat <- matrix(NA, nrow=length(locs), ncol=length(locs))
+    for(i in 1:length(locs)){
+        for(j in 1:length(locs)){
+            distmat[i,j] <- dfunc(locs[[i]], locs[[j]])
+        }
+    }
+    return(distmat)
+}
+
+estVar <- function(dMat, vals,bnum=20, intv=1, min_=.5){
+    bins <- lapply(1:bnum, function(x) vector("numeric"))
+    for(i in 1:(length(vals)-1)){
+        for(j in (i+1):length(vals)){
+            for(k in 1:bnum){
+                low_ <- seq(min_, bnum * intv - min_, intv)[k]
+                high_ <-low_ + intv
+                if(dMat[i,j] > low_ & dMat[i,j] <= high_){
+                    bins[[k]] <- c(bins[[k]], (vals[j] - vals[i])^2) 
+                }
+            }
+            
+        }
+    }
+    DFvar <- data.frame(
+        bin=seq(min_, bnum * intv - min_, intv),
+        var=sapply(bins, function(x) mean(x) * .5))
+    return(DFvar)
+}
+
+expfit <- function(h, r, s){
+    return(s * (1 - exp(-h/(r * 1/3))))
+}
+
+likli <- function(params, datur){
+    s <- exp(params[1])
+    r <- exp(params[2])
+    h <- datur$bin
+    gamhat <- expfit(h, r, s)
+    return(mean((gamhat - datur$var)^2))
+}
+
+covfunc_ <- function(datur, init=c(0, 0)){
+    optpars <- exp(optim(init, likli, datur=datur)$par)
+    s <- optpars[1]
+    r <- optpars[2]
+    return(function(x) expfit(x, r, s))
+}
+
+dMat <- leman88 %>% select(x,y) %>% distMatFunc
+vargram <- estVar(dMat, leman88$CdDetrend)
+
+covK <- covfunc_(vargram)
+estvar <- data.frame(h=seq(.1, 20, .1)) %>%
+    mutate(yh=covK(h))
+
+ggplot(vargram, aes(x=bin, y=var)) + geom_point() + 
+    geom_line(aes(x=h, y=yh), data=estvar) +
+    labs(x="h", y=expression(gamma~(h)), main="Semivariogram")
+```
+
+## Kriging Done using Hand Written Functions
+
+```{R}
+krige_func <- function(newdat, col_, cfunc){
+    fullMat <- newdat %>% select(x,y) %>% distMatFunc %>% cfunc
+    obs <- !is.na(newdat[,col_]) 
+    obsMat <- fullMat[obs, obs]
+    inMat <- fullMat[obs,]
+    obsDat <- newdat[obs,col_]
+    newdat$estval <- c(solve(obsMat, obsDat) %*% inMat)
+    newdat[obs, "estval"] <- newdat[obs, col_]
+    return(newdat)
+}
+
+dataInput <- expand.grid(x=500:560, y=115:150) %>%
+    left_join(leman88 %>% select(x, y, CdDetrend), by=c("x", "y")) %>%
+    krige_func("CdDetrend", covK)
+
+ggplot(dataInput, aes(x=x, y=y, fill=estval)) + geom_tile() +
+    scale_fill_distiller(palette = "Spectral", name="Cd") + 
+    labs(title="Estimated Surface Area of De-Meaned Cd")
+```
+
+## Make Compairsons to Canned (built in) function
+
+
+```{R}
+leman88SPDF <- leman88
+coordinates(leman88SPDF) <- ~ x + y
+leman88InputSPDF <- dataInput
+coordinates(leman88InputSPDF) <- ~ x + y
+can.vgm <- variogram(CdDetrend~1, leman88SPDF)  
+can.fit <- fit.variogram(can.vgm, model=vgm(.6, "Exp", 10)) # fit model
+plot(can.vgm, can.fit, main="Canned Variogram Estimator") 
+```
+
+```{R}
+can.kriged <- krige(
+    CdDetrend ~ 1, leman88SPDF,  leman88InputSPDF, model=can.fit, beta=0)
+can.kriged %>% as.data.frame %>%
+    ggplot(aes(x=x, y=y)) + geom_tile(aes(fill=var1.pred)) +
+    scale_fill_distiller(palette = "Spectral", name="Cd") +
+    labs(title="Canned Kriging of De-Meaned Cd")
+```
+
+## Plot the difference between the two models.
+
+```{R}
+can.kriged %>% as.data.frame %>% left_join(dataInput) %>% 
+    mutate(diff=(var1.pred - estval)) %>%
+    ggplot(aes(x=x, y=y)) + geom_tile(aes(fill=diff)) +
+    scale_fill_distiller(palette = "Spectral", name="Canned-\nEstimated") +
+    labs(title="Difference of Methods")
+```
+
+Though the relative difference between the two models is small the biggest absolute difference bewteened the canned version and the one written by hand is locations just begging to deviate from a cluster of points. This is probably due to the difference in the range of the two estimation process.
+
+# Plotting ocean data
+
+In order to plot the ocean data we will use the same approach as mentioned above however after demeaning the distribution of observed depths and kringing we will add back on the mean value. Because the variance of the difference between two points is much larger than the previous example we will choose different starting values when optimizing the exponential fit of the semi variogram.  
+
+```{R}
+
+# pulled from website in article
+getDataforRectangle <- function(latN,latS, longW,longE){
+  if(abs(latN) > 90   | abs(latS)  > 90 | 
+     abs(longW) > 180 | abs(longE) > 180 |
+     latS > latN | longW > longE)  return("invalid input")
+  else {
+  returned=postForm("http://topex.ucsd.edu/cgi-bin/get_srtm30.cgi",
+            "north" = toString(latN), "south" = toString(latS),
+            "east" = toString(longE), "west" = toString(longW) )
+           
+  #print(returned);
+  LINE=strsplit(returned,"\n");
+  n=length(LINE[[1]]) ; #print(n)
+  line=LINE[[1]][2:n]
+  sp = function(x)  as.numeric( (strsplit(x,"\t"))[[1]] )
+  u=matrix(unlist( lapply(line, sp ) ), ncol=3, byrow=TRUE) ; #u 
+  colnames(u) = c("long","lat","elevation.metres")
+  return(data.frame(u))
+  }
+}
+ 
+Oscale <- .00125#.0025
+
+Odata <- getDataforRectangle(52.1, 52, -10.1, -10) %>%
+    mutate_at(c("lat", "long"), function(x) round(x/Oscale)*Oscale) %>%
+    rename(x=lat, y=long) %>%
+    mutate(dtrend=(elevation.metres - mean(elevation.metres)))
+
+ggplot(Odata, aes(x=x, y=y, color=elevation.metres)) + 
+    geom_point() + 
+    labs(title="Observed Depths of Ocean Data") +
+    scale_color_distiller(palette = "Spectral", name="Depth")
+
+dMatO <- Odata %>% select(x,y) %>% distMatFunc
+vargramO <- estVar(dMatO, Odata$dtrend, 12, .01, .005)
+
+covKO <- covfunc_(vargramO, init=log(c(30000, .06)))
+estvarO <- data.frame(h=seq(.005, .12, .01)) %>%
+    mutate(yh=covKO(h))
+
+ggplot(vargramO, aes(x=bin, y=var)) + geom_point() + 
+    geom_line(aes(x=h, y=yh), data=estvarO) +
+    labs(x="h", y=expression(gamma~(h)), main="Semivariogram") +
+    labs(title="Ocean Data Variogram")
+```
+
+```{R}
+
+dataInputO <- 
+    expand.grid(x=seq(52, 52.1, Oscale), y=seq(-10.1, -10, Oscale)) %>%
+    left_join(Odata %>% select(x, y, dtrend), by=c("x", "y")) %>%
+    krige_func("dtrend", covKO) %>%
+    mutate(estval=estval+mean(Odata$elevation.metres))
+
+ggplot(dataInputO, aes(x=x, y=y, fill=estval)) + geom_tile() +
+    scale_fill_distiller(palette = "Spectral", name="Depth") + 
+    labs(title="Fine Grid Map of Ocean Depth Using Kriging")
+```

@@ -1,0 +1,299 @@
+---
+title: "STAT517 HW2"
+author: "Neal Marquez"
+date: "January 22, 2018"
+output: html_document
+---
+
+```{r setup, message=FALSE, warning=FALSE}
+rm(list=ls())
+
+library(dplyr)
+library(ggplot2)
+library(geoR)
+library(fields)
+library(kernlab)
+library(seqinr)
+library(parallel)
+RNGkind("L'Ecuyer-CMRG")
+set.seed(123)
+```
+
+1. Redo the plots in chapter 5 except section 5.5 plots.
+
+```{R}
+data(SIC)
+DF <- data.frame(x=seq(2.5,6.4,by=.1)) %>%
+    mutate(y=(log(1/(1 + exp(-x))) + .1) *10) %>%
+    mutate(x=x-min(x))
+
+DF %>%
+    ggplot(aes(x,y)) + geom_line() +
+    ylim(c(0, 1.1)) +
+    geom_hline(linetype=2, yintercept = 1) +
+    geom_hline(linetype=2, yintercept = min(DF$y)) +
+    geom_hline(linetype=3, yintercept=.95) + 
+    geom_vline(linetype=3, xintercept=2.8) +
+    geom_text(x=3.25, y=.25, label="Nugget") +
+    geom_text(x=2.75, y=.16, label="Practical Range") +
+    geom_text(x=3.25, y=1.05, label="Sill") +
+    labs(x="u", y="V(u)", "Variogram Example")
+
+plot(variog(
+    coords=sic.all$coords, data=sic.all$data), 
+    main="Estimated Variogram")
+
+plot(variog(
+    coords=sic.all$coords, data=sic.all$data, option="cloud"), 
+    main="Empirical Variogram")
+
+v1 <- variog(coords=sic.all$coords, data=sic.all$data)
+v2 <- variog(coords=sic.all$coords, data=sic.all$data, trend="1st")
+
+vfit1 <- variofit(v1, cov.model="matern")
+vfit2 <- variofit(v1, cov.model="cubic")
+
+plot(v1$u, v1$v, type="l", lty=3); lines(v2$u, v2$v, lty=2); lines(vfit1)
+title("Variogram Example Models")
+
+plot(v1$u, v1$v); lines(vfit1); lines(vfit2, lty=2)
+title("Variogram Example Fits")
+
+va1 <- variog(coords=sic.all$coords, data=sic.all$altitude)
+va1fit1 <- variofit(va1, cov.model="matern", kappa=.5)
+va1fit2 <- variofit(va1, cov.model="matern", kappa=1.5)
+va1fit3 <- variofit(va1, cov.model="matern", kappa=2.5)
+plot(va1$u, va1$v, xlab="u", ylab="V(u)")
+lines(va1fit1); lines(va1fit2, lty=2); lines(va1fit3, lty=3)
+title("Consant Mean with Different Kappa Values")
+
+va2 <- variog(coords=sic.all$coords, data=sic.all$altitude, trend="2nd")
+va2fit1 <- variofit(va2, cov.model="matern", kappa=.5)
+va2fit2 <- variofit(va2, cov.model="matern", kappa=1.5)
+va2fit3 <- variofit(va2, cov.model="matern", kappa=2.5)
+plot(va2$u, va2$v, xlab="u", ylab="V(u)")
+lines(va2fit1); lines(va2fit2, lty=2); lines(va2fit3, lty=3)
+title("Linear Trend Mean with Different Kappa Values")
+
+DFmap <- as.data.frame(sic.all$coords) %>% rename(x="V2", y="V3") %>% 
+    mutate(z=sic.all$data)
+
+ggplot() + 
+    geom_path(mapping=aes(x=sic.borders[,1], y=sic.borders[,2])) + 
+    geom_point(aes(x=x, y=y, size=z, fill=y), shape=21, data=DFmap) + 
+    theme_minimal() +
+    labs(x="Coordinate X", y="Coordinate Y") +
+    scale_size_continuous(guide=FALSE) +
+    scale_fill_continuous(guide=FALSE)
+
+
+mlfit <- likfit(coords=sic.all$coords, data=sic.all$data, ini = c(1,0.5), messages=F)
+bin1 <- variog(coords=sic.all$coords, data=sic.all$data, nugget.tolerance = 10)
+env.model <- variog.mc.env(sic.all, obj.var=bin1, nsim=1000)
+plot(bin1$u, bin1$v, ylim=c(0,35000))
+lines(env.model$u, env.model$v.lower, lty=2)
+lines(env.model$u, env.model$v.upper, lty=2)
+```
+
+1. The "Lake Geneva" dataset consists of measurements collected to study the heavy metal contamination of lake Geneva in Switzerland.
+
+    1. Conduct an exploratory data analysis of the Lake Geneva dataset focusing on the heavy metal Cd.
+    
+```{R 1a}
+load(url("http://faculty.washington.edu/zaid/teaching/2017/stat517/LakeGeneva.RData"))
+leman <- rbind(
+    leman78 %>% mutate(year=78) %>% select(x, y, Cd, year) %>% 
+        mutate(CdDetrend=c(scale(Cd))), 
+    leman83 %>% mutate(year=83) %>% select(x, y, Cd, year) %>% 
+        mutate(CdDetrend=c(scale(Cd))),
+    leman88 %>% mutate(year=88) %>% select(x, y, Cd, year) %>% 
+        mutate(CdDetrend=c(scale(Cd)))) %>% 
+    filter(y < 150 & Cd < 1000) %>% # get rid of extreme outliers
+    mutate(CdDetrend=CdDetrend - min(CdDetrend) + 1) %>%
+    mutate(lCD=log(CdDetrend), cquant=cut(lCD, 64))
+leman_geo <- as.geodata(leman, 1:2, 6)
+leman_geo$year <- leman$year
+
+par(mfrow=c(2,2))
+plot(y ~ x, col=tim.colors()[cquant], pch=19, data=leman %>% filter(year==78), main=78)
+plot(y ~ x, col=tim.colors()[cquant], pch=19, data=leman %>% filter(year==83), main=83)
+plot(y ~ x, col=tim.colors()[cquant], pch=19, data=leman %>% filter(year==88), main=88)
+hist(leman$lCD, breaks=30)
+par(mfrow=c(1,1))
+```
+    
+    2. Compute and plot the empirical variogram. You may use the function variog. What do you observe?
+
+```{R 1b}
+plot(variog(
+    coords=leman %>% select(x,y), data=leman$lCD, 
+    trend=trend.spatial(~coords+year, leman_geo)),
+     ylim=c(.05, .08))
+```
+
+The nugget appears to be around .055 while the range of the semivariance seems to be around 20 kilometers.
+
+    3. Fit a linear model with Cd as response variable such that the resulting residuals do not show any significant spatial trend.
+    
+```{R 1c}
+lm1 <- glm(lCD ~ x * y * abs(x-530) * year, data=leman)
+DFlm <- leman %>% mutate(preds=predict(lm1), residuals=lm1$residuals) %>%
+    mutate(ResQ=cut(residuals, 64))
+
+par(mfrow=c(2,2))
+plot(y ~ x, col=tim.colors()[ResQ], pch=19, data=DFlm %>% filter(year==78), main=78)
+plot(y ~ x, col=tim.colors()[ResQ], pch=19, data=DFlm %>% filter(year==83), main=83)
+plot(y ~ x, col=tim.colors()[ResQ], pch=19, data=DFlm %>% filter(year==88), main=88)
+hist(DFlm$residuals, breaks=30)
+par(mfrow=c(1,1))
+```
+
+    4. Compute and plot the empirical variogram from the residuals after fitting the linear model.
+    
+```{R 1d}
+plot(variog(coords=DFlm %>% select(x,y), data=DFlm$residuals))
+```
+
+    5. Compute and compare several variograms from the residuals after fitting the linear model. What do you observe? Which one seems more appropriate? Why?
+    
+```{R 1e}
+par(mfrow=c(2,2))
+plot(variog(coords=DFlm %>% select(x,y), data=DFlm$residuals))
+plot(variog(coords=DFlm %>% select(x,y), data=DFlm$residuals, option="cloud"))
+plot(variog(coords=DFlm %>% select(x,y), data=DFlm$residuals,
+            estimator.type="modulus"))
+plot(variog(coords=DFlm %>% select(x,y), data=DFlm$residuals, option="cloud",
+            estimator.type="modulus"))
+par(mfrow=c(1,1))
+```
+
+The modulus fit seen in the third panel seems to have the best fit as it does not appear to have a trend of continued increase for the variance, which should now be stationary.
+
+3a. Look at the string kernels implemented by help(stringdot). Check that you understand them. To create and test a string kernel:
+ 
+```{R}
+## Create a 2-spectrum kernel
+sk <- stringdot(length = 2, normalized = F)
+## Compute the kernel between two words
+sk( "radar", "abracadabra")
+sk <- stringdot(length = 3, normalized = F)
+## Compute the kernel between two words
+sk( "radar", "abracadabra")
+## Compute the kernel between two words
+sk <- stringdot(type="boundrange", length = 3, normalized = F)
+## Compute the kernel between two words
+sk( "radar", "abracadabra")
+## Create a 2-spectrum kernel
+sk <- stringdot(type = "exponential", normalized = F)
+## Compute the kernel between two words
+sk( "radar", "abracadabra")
+```
+
+The spectrum model counts all ngrams of a length specified that match in both strings, while `boundrange` will do the sum of all ngrams less than a specfied length. The `exponential` model does the same but applies a weight to the counts as the matching substrings get longer. Normalize adjusts the returned value such that all values are adjusted for the number of anagrams possible so that the returned value is always between 0 and 1.
+
+3b. Apply these kernels to the reuters data set. Which model performs best?
+
+```{R}
+kernels <- list(
+    spectrum1=stringdot(type="spectrum", length=5, normalized=T),
+    boundrange1=stringdot(type="boundrange", length=5, normalized=T),
+    spectrum2=stringdot(type="spectrum", length=10, normalized=T),
+    boundrange2=stringdot(type="boundrange", length=10, normalized=T),
+    exponential=stringdot(type="exponential", normalized=T)
+    )
+
+data(reuters)
+DF <- data.frame(x=unlist(reuters), y=rlabels, stringsAsFactors=F)
+m <- 50
+ho <- 5
+oosScore <- matrix(NA, nrow=length(kernels), ncol=m)
+
+set.seed(123)
+for(j in 1:m){
+    #print(j)
+    pool <- sample(c(rep(TRUE, nrow(DF)-ho), rep(FALSE, ho)), nrow(DF))
+    DFSub <- DF[pool,]
+    for(i in 1:length(kernels)){
+        k <- kernels[[i]]
+        model_ <- gausspr(x=DFSub$x, y=DFSub$y, scaled=FALSE, kernel=k, 
+                          cross=ho)
+        oosScore[i,j] <- model_@cross
+    }
+}
+
+DFresults <- data.frame(
+    Model=rep(names(kernels), m),
+    simulation=rep(1:m, each=length(kernels)),
+    MSE=c(oosScore))
+
+DFresults %>% ggplot(aes(x=MSE, fill=Model)) + 
+    geom_density(alpha=.3) + 
+    labs(title="K-fold Cross Validation MSE for 50 Bootstrapped Samples")
+```
+
+Bootstrapping the data set so that we may run multiple iterations of k fold validation and estimate held out mean squred error shows that the spectrum kernels out perform the exponential and boundrange models. 
+
+3c. Apply a similar set of tests to the gene data set. What do you observe?
+
+```{R}
+# Read data in FASTA format
+protdata <- "http://www.psort.org/dataset/dataset1_0.txt" %>%
+    url %>% read.fasta(seqtype="AA",as.string=TRUE)
+length(protdata)
+# To speed up computation, we will only work on a subset of
+# 100 randomly selected proteins
+set.seed(123)
+protdata <- protdata[sample(length(protdata),100)]
+# Save it to a file for future use if needed
+# write.fasta(protdata,names=names(protdata),file.out="smalldataset.fa")
+# Extract protein localization information
+annotation <- getName(protdata)
+# We get the location information by parsing the annotation as follows
+extractloc <- function(s){strsplit(s,"|",fixed=TRUE)[[1]][3]}
+loc <- unlist(lapply(annotation,extractloc))
+# Extract the protein sequences
+x <- unlist(getSequence(protdata,as.string=TRUE),recursive=FALSE) %>%
+    unlist
+# Focus on inner and outer membrane integral membrane proteins
+y <- factor((loc=="Inner") | (loc=="Outer"))
+
+DFgene <- data.frame(x=x, y=y, stringsAsFactors=FALSE)
+
+kernelsGene <- list(
+    spectrum1=stringdot(type="spectrum", length=5, normalized=T),
+    spectrum2=stringdot(type="spectrum", length=10, normalized=T),
+    spectrum3=stringdot(type="spectrum", length=15, normalized=T),
+    exponential=stringdot(type="exponential", normalized=T)
+)
+
+mGene <- 50
+hoGene <- 15
+
+set.seed(123)
+oosScoreGene <- mclapply(1:mGene, function(j){
+    oosScoreGeneSub <- rep(0, length(kernelsGene))
+    pool <- sample(c(rep(TRUE, nrow(DFgene)-hoGene), rep(FALSE, hoGene)), 
+                   nrow(DFgene))
+    DFSub <- DFgene[pool,]
+    for(i in 1:length(kernelsGene)){
+        k <- kernelsGene[[i]]
+        model_ <- gausspr(x=DFSub$x, y=DFSub$y, scaled=FALSE, kernel=k, 
+                          cross=hoGene)
+        oosScoreGeneSub[i] <- model_@cross
+    }
+    return(oosScoreGeneSub)
+    }, 
+    mc.cores=8) %>% do.call(cbind, .)
+
+DFresultsGene <- data.frame(
+    Model=rep(names(kernelsGene), mGene),
+    simulation=rep(1:mGene, each=length(kernelsGene)),
+    MSE=c(oosScoreGene))
+
+DFresultsGene %>% ggplot(aes(x=MSE, fill=Model)) + 
+    geom_density(alpha=.3) + 
+    labs(title="K-fold Cross Validation MSE for 50 Bootstrapped Samples")
+
+```
+
+Running a similar K fold analysis for the gene data set we see that the exponential model performs better than any of the spectrum models tested.

@@ -1,0 +1,102 @@
+\documentclass[10pt]{article}
+\usepackage{fullpage, amsmath, amsthm, amsfonts, graphicx, bbm}
+
+%\usepackage{epsfig}
+
+\newcommand{\Ex}[2]{\mathop{\mathbb{E}}\displaylimits_{#1}\left
+[ #2 \right ]}
+\newcommand{\Expect}[1]{\mathop{\mathbb{E}}\left
+[ #1 \right ]}
+
+\begin{document}
+\input{stat517-preamble.tex}
+
+\lecture{5}{}{Zaid Harchaoui}{Neal Maquez}%Replace "Jyn Erso" by your name(s)
+
+%%%% body goes in here %%%%
+\section{Gaussian Processes and Variograms}
+
+Consider a Gaussian process where...
+
+\begin{flalign*}
+\{ Z(x) & \}_{x \in D} \\
+\text{Covariance} ~&~ \kappa(x, x')  \\
+\text{SemiVariogram} ~&~ \gamma(h) = \frac{1}{2} \text{Var} (Z(x) - Z(x+h))
+\end{flalign*}
+
+The SemiVariogram is a measure of the variance of differences between $x$ and
+$x'$. Called SemiVariogram because of the $\frac{1}{2}$.
+
+\includegraphics{semivariogram}
+
+\begin{itemize}
+    \item \textbf{Nugget}: Variogram value at 0
+    \item \textbf{Sill}: Asymptote of Variogram
+    \item \textbf{Range}: $h$ such that $\gamma (h) \approx .95$ of sill
+\end{itemize}
+
+Consider the functional form $\gamma(h ; \theta)$ where $\theta$ is a parameter
+that dictates the shape of the SemiVariogram and is fitted to some set of data.
+
+\section{Non-Linear Least Squares}
+
+$$
+\hat{\theta} = \underset{\theta}{\text{Argmin}} \sum_{l=1}^K
+    \Big( \hat{\gamma}(h_l) - \gamma(h_l ; \theta) \Big)^2
+$$
+
+\subsection{Tolerance Region}
+
+\begin{flalign*}
+T(h) & = \{ k: ||k-h||_2 \leq L , \frac{k^T h}{||k||~||h||} \leq a \} \\
+J(h) & = \{ (i,j); (x_i , x_j) \in T(h) \} \\
+N_J & = \text{Cardinal}(J(h)) \\
+\hat{\gamma} (h) & = \frac{1}{2 N_J} \sum_{i,j \in J(h)} \Big(
+    Z(x_i) - Z(x_j) \Big)^2 \\
+\gamma(h) & = \frac{1}{2} \text{Var}(Z(x) - Z(x+h))
+\end{flalign*}
+
+\subsection{Notes on Optimizing SemiVariogram}
+
+\begin{itemize}
+    \item Not convex
+    \item Local Minimum
+    \item Optimization not well specified
+\end{itemize}
+
+\section{MLE of Gaussian Process}
+
+\begin{flalign*}
+    Z & \sim GP(\boldsymbol{\mu}, C(\theta)) \\
+    \text{nll} &= n \text{log}(2 \pi) + \text{log} (\text{det} C(\theta)) +
+        (Z - \boldsymbol{\mu} \mathbbm{1})^T C(\theta)
+        (Z - \boldsymbol{\mu} \mathbbm{1}) \\
+    \underset{\boldsymbol{\mu}, \theta}{\text{Minimize}} & ~
+        \mathcal{L}(Z; \boldsymbol{\mu}, \theta)
+\end{flalign*}
+
+\subsection{Minimizing $\mu$ and $\theta$ Jointly}
+
+\begin{itemize}
+    \item Difficult to define
+    \item Not a convex optimization problem
+\end{itemize}
+
+\subsection{Profile Likelihood Method}
+
+\begin{itemize}
+    \item Estimate $\boldsymbol{\mu}$ (as a function of $C(\theta)$)
+    \item estimate $\theta$
+\end{itemize}
+
+There are 2 steps of alternating estimation with a closed form formula for
+$\boldsymbol{\mu}$.
+
+\begin{flalign*}
+    \hat{\boldsymbol{\mu}}(\theta) & =
+        (\mathbbm{1}^T C(\theta)^{-1} \mathbbm{1})^{-1} C(\theta)^{-1} Z \\
+    \hat{\theta} &= \underset{\theta}{\text{Arg min}} 
+        \underbrace{\mathcal{L}(Z; \hat{\boldsymbol{\mu}}(\theta))}_{\text{Profile Likelihood}}
+\end{flalign*}
+
+\end{document}

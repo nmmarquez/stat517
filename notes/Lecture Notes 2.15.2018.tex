@@ -1,0 +1,149 @@
+\documentclass{article}
+\usepackage{amsmath}
+
+\begin{document}
+
+\title{Lecture Notes 2.15.2018}
+\author{Anne Polyakov \& Neal Marquez}
+\date{February 15, 2018}
+\maketitle
+
+\section{Paper Review Project}
+
+
+Week 7 - Find your covariance function, know our model and the problem, and download data of the paper
+
+Week 8 - Do the mathematical derivations, and create the first prototype code.
+
+Week 9 - Run the experiments, with simulated data and real data. You can use cluster computing at UW, called Hyak!
+
+
+Week 10 - Wrap up.
+
+
+\section{Variational Inference}
+
+Assume observed data \[y = (y_1, ..., y_n)\]
+
+\underline{Hidden Variables:} \[x = (x_1, ..., x_n)\]
+
+\underline{Model:} \[ p(x,y) \]
+
+\underline{Posterior:} \[p(x|y) = \frac{p(x,y)}{p(y)}\]
+
+
+
+We have several problems or tasks:
+
+1) Mode of posterior: \[Argmax(p(x|y))\]
+
+2) Marginals: \[p(x_i|y)\]
+
+3) Evidence: \[p(y) =  \int\ p(x,y) \ dx \]
+
+4) \[p(x|y) \simeq q(x) \]
+
+\[
+q(x) \in F
+\]
+
+where F is a tractable family of distributions
+
+Solve the variational problem (optimization):
+
+\[ Min KL(q(x) || p(x|y)) \]
+
+Minimize over \[q \in F \]
+
+KL is not symmetric.
+
+\[KL(q(x)||p(x|y)) = \int\ q(x) \log \frac{q(x)}{p(x|y)} \ dx \]
+
+\[= -E( \log (p(x,y))  E(q) + \int\ q(x) \log q(x) \ dx) - S(q) + \log p(y) \geq 0  \]
+
+In statistical physics, the \[= -E( \log (p(x,y))  E(q) \] term is the energy, and the \[\int\ q(x) \log q(x) \ dx) - S(q) + \log p(y) \geq 0  \] is the entropy.
+
+\underline{Expectation Propagation} (belief propagation + variational approximation)
+
+Instead of this: \[ Min KL(q(x)||p(x|y)) \]
+
+We write \[Min KL(p(x|y)||q(x)) \]
+
+q(x) is the exponential family
+\[q(x) = h(x) \exp (\theta^T \phi(x) + g(\theta)) \]
+
+If q is Gaussian, then \[\theta = \Sigma^{-1} \mu, -\frac{1}{2} \Sigma^{-1} \]
+
+\[ \phi(x) = (x, xx^T) \]
+
+Minimization of \[KL (p(x|y)||q(x)) \], which is reverse KL
+
+\[ \nabla_\theta KL(p(x|y)|q(y)) = - \int p(x|y) \phi(x) \ dx - \int p(x|y) \nabla_\theta g(\theta) \]
+
+\[ E_p \nabla_\theta g(\theta) = -E_q \phi(x) \]
+
+\[ \nabla_\theta KL(p(x|y) || q) = -E_p \phi(x) + E_q \phi(x) = 0 \]
+
+\[ Min KL (p||q) \] is moment maching
+
+\section{Density Filtering}
+
+Lets assume a sitaution where data arrives sequentially up to an instant $t$.
+
+\begin{flalign*}
+  y_1, \dots , y_2 , \dots &~~~ \text{data arrives sequentially}\\
+  \mathcal{D}_t = \{ y_1 \dots y_t\} &~~~ \text{up to an instant } t\\
+  \underbrace{p(x | \mathcal{D}_{t+1}) \propto p(y_{t+1} | x) \times p(x|\mathcal{D})}_{\text{Bayesian Updating}}
+      &~~~ \text{When } y_{t+1} \text{ comes to us} \\
+  p(x | \mathcal{D}_{t+1}) &~~~ \text{Update the posterior}  \\
+  \underset{q \in \mathcal{F}}{\operatorname{Min}} ~\text{KL}\Big(p(x | \mathcal{D}_{t+1}) || q_\theta^{(t)}(x) \Big)
+\end{flalign*}
+
+\subsection{Assumed Density Filtering Algorithm}
+
+\begin{flalign*}
+  \text{Set} ~~~& q_\theta^{(0)}(x) = p_0(x)\\
+  \text{Update} ~~~& p(x|\mathcal{D}_{t+1}) =
+      \frac{p(y_{t+1}|x)q_\theta^{(t)}(x)}{\int p(y_{t+1}|x)q_\theta^{(t)}(x) dx}\\
+  \text{Project} ~~~& q_\theta^{(t+1)}(x) = \underset{q \in \mathcal{F}}{\operatorname{Min}}
+      ~\text{KL}\Big(p(x | \mathcal{D}_{t+1}) || q_\theta(x) \Big)\\
+\end{flalign*}
+
+\subsection{Expectation Propogation}
+
+Consider the Bayesian probit classification context.
+
+Probit $y$(binary) from $x$.
+\begin{flalign*}
+  y_t &= \operatorname{sign}(h_w(s_t)) \\
+  p(y_t|w,s_t) &= \frac{1}{2} + \frac{1}{\sqrt{2 \pi}} \int e^{-\frac{u^2}{2}} du \\
+  p(w|y_{t+1}, s_{t+1}) &\propto p(y_{t+1} | w,s_{t+1}) \\
+  p_t(w) &\propto \operatorname{exp}(-\frac{1}{2} |w|^2)^q_\theta(w) \\
+  p(x|y) &= \frac{p_0(x) \prod_{\ell=1}^{m}p(y_\ell | x)}{\int p_0(x) \prod_{\ell=1}^{m}p(y_\ell | x) dx} \\
+  &= \frac{1}{Z} f_0(x) \prod_{\ell=1}^{m} f_\ell (x)
+\end{flalign*}
+
+\subsection{Expectation Propogation Applied}
+
+Computing
+$$
+q(x) = \frac{1}{Z} f_0(x) \prod_{\ell=1}^{m} g_\ell (x)
+$$
+using assumed density filtering.
+
+\begin{flalign*}
+  \text{Init} &~~~ q(x) = f_0(x) ~~~ (f_0 \text{ prior from exponential family}) \\
+  &~~~ q_\ell (x) = 1 ~~\text{for}~\ell=1 \dots m \\
+  \text{Iterate} &~~~ \text{picking } \ell \in \{1 \dots m\} \text{ at random} \\
+  &~~~ \underset{\text{remove}}{\text{"   "}} ~ g_\ell(x) \text{ compute }
+       q_{`\ell} \propto \underbrace{\frac{q(x)}{g_\ell(x)}}_{\underset{q_\ell \in \mathcal{F}}{\text{tilted distribution}}} \\
+  \text{Update} &~~~ q_\ell(x) = f_\ell (x) q_{`\ell} (x) \\
+  \text{Project} &~~~ q_\ell (x) = \underset{q \in \mathcal{F}}{\operatorname{argmin}}
+      \text{ KL}\Big( q_\ell(x) || q(x) \Big) \\
+  \text{Project} &~~~ q_\ell(x) = \frac{q`(x)}{q_{`\ell} (x)} \propto
+      \frac{q`(x)}{q(x)} g_\ell (x)
+\end{flalign*}
+
+Where $q(x)$ is normalized with respect to $Z$.
+
+\end{document}

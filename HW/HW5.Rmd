@@ -1,0 +1,259 @@
+---
+title: "STAT517 HW5"
+author: "Neal Marquez"
+date: "March 4th, 2018"
+output: html_document
+---
+
+```{R warning=FALSE,message=FALSE}
+rm(list=ls())
+library(spam)
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(pander)
+```
+
+Let $X_1 \sim \mathcal{N}(0, \frac{1}{1-\phi^2}), ~ X_i = \phi X_{i-1} + \epsilon_i, ~ \epsilon_i \sim \mathcal{N}(0, 1), i = 2, 3, \dots n$. Further let $Q=\Sigma^{-1}$ denote the precision matrix of $X$.
+
+1a) Define Q in $\mathcal{R}$ for $n=100, 500, 1000$. Display the sparsity of Q.
+
+$$
+E[X_1] = 0 \\
+E[X_2] = \phi E[X_1] + E[\epsilon_1] = 0\\
+\therefore E[X_i] = 0 \text{  for all } i \in \{1, 2, \dots n\}\\
+\text{Var}[X_1] = \frac{1}{1-\phi^2} \\
+\text{Var}[X_2] = \phi^2 \text{Var}[X_1] + \text{Var}[\epsilon_2] \\
+\text{Var}[X_2] = \frac{\phi^2}{1-\phi^2} + \frac{1-\phi^2}{1-\phi^2} = \frac{1}{1-\phi^2} \\
+\therefore \text{Var}[X_i] = \frac{1}{1-\phi^2} \text{  for all } i \in \{1, 2, \dots n\}\\
+\text{Cor}[X_i,X_{i-n}] = \phi^n \\
+\text{Cor}[X_i,X_{i-n}] = \frac{\text{Cov}[X_i,X_{i-n}]}{\sqrt{\text{Var}[X_i]}\sqrt{\text{Var}[X_{i-n}]}} \\
+\text{Cov}[X_i,X_{i-n}] = \frac{\phi^n}{1-\phi^2} \\
+\text{For a time series with three data points we have} \\
+\Sigma= \begin{bmatrix}
+\frac{1}{1-\phi^2} & \frac{\phi}{1-\phi^2} & \frac{\phi^2}{1-\phi^2} \\
+\frac{\phi}{1-\phi^2} & \frac{1}{1-\phi^2} & \frac{\phi}{1-\phi^2} \\
+\frac{\phi^2}{1-\phi^2} & \frac{\phi}{1-\phi^2} & \frac{1}{1-\phi^2} \\
+\end{bmatrix} \\
+\text{We can invert this matrix by hand using the formula } \\
+Q = \frac{1}{\text{det}(\Sigma)} \text{Adj}(\Sigma) \\
+\text{Which then yields the following matrix }\\
+Q= \begin{bmatrix}
+1 & -\phi & 0 \\
+-\phi & {1+\phi^2} & -\phi \\
+0 & -\phi & 1 \\
+\end{bmatrix} \\
+\text{Because the patterns of } \Sigma \text{ are consistent so, are } Q.
+\therefore \\
+Q_{1,1} = Q_{n,n} = 1 \\
+Q_{i,i} = 1 + \phi^2 \text{; for } i \in \{ 2, ... n-1\} \\
+Q_{i,i-1} = Q_{i-1,i} = -\phi \text{; for } i \in \{ 2, ... n\} \\
+$$
+All other elemsnts of the precision matrix are $0$ which is in line with the markov property specfied such that $X_i \perp\!\!\!\perp X_{-\{i, i-1, i+1\}} | X_{i-1}, X_{i+1}$.
+
+
+```{R}
+Q.AR1 <- function(M, rho, sparse = FALSE) {
+    Q <- matrix(0, nrow = M, ncol = M)
+    Q[1, 1] <- 1
+    for (i in 2:M) {
+        Q[i, i] <- 1 + rho^2
+        Q[i - 1, i] <- -1 * rho
+        Q[i, i - 1] <- -1 * rho
+    }
+    Q[M, M] <- 1
+    if (sparse) 
+        Q <- as.spam(Q)
+    Q
+}
+
+melt(Q.AR1(100, .5, sparse=F)) %>%
+    mutate(value=ifelse(value!=0, value, NA)) %>%
+    ggplot(aes(Var1,Var2, fill=value)) + geom_raster() + 
+    scale_y_reverse() + theme_void() + 
+    labs(title="Precision for N=100(Grey=0)")
+
+melt(Q.AR1(500, .5, sparse=F)) %>%
+    mutate(value=ifelse(value!=0, value, NA)) %>%
+    ggplot(aes(Var1,Var2, fill=value)) + geom_raster() + 
+    scale_y_reverse() + theme_void() + 
+    labs(title="Precision for N=500(Grey=0)")
+
+melt(Q.AR1(1000, .5, sparse=F)) %>%
+    mutate(value=ifelse(value!=0, value, NA)) %>%
+    ggplot(aes(Var1,Var2, fill=value)) + geom_raster() + 
+    scale_y_reverse() + theme_void() + 
+    labs(title="Precision for N=1000(Grey=0)")
+```
+
+1b) Measure the time needed to calculate the Cholesky decomposition of Q.
+
+100 recorded times of a cholesky decomposition of Q where $n=1000$ are shown.
+```{R}
+denseTimes <- sapply(1:100, function(x)
+    system.time(chol(Q.AR1(1000, .5, sparse=F))))
+denseTimes %>% t %>% as.data.frame %>% summary %>% pander
+```
+
+1c) Repeat 1b) using the sparse matrix format from the `spam` library. Compare the speed
+of Cholesky decomposition with 1b).
+
+```{R}
+denseTimes <- sapply(1:100, function(x)
+    system.time(chol(Q.AR1(1000, .5, sparse=F))))
+sparseTimes <- sapply(1:100, function(x)
+    system.time(chol.spam(Q.AR1(1000, .5, sparse=T))))
+
+rbind(t(denseTimes), t(sparseTimes)) %>% as.data.frame %>%
+    mutate(Type=rep(c("dense", "sparse"), each=100)) %>%
+    ggplot(aes(x=elapsed, group=Type, fill=Type)) + geom_histogram() + 
+    labs(x="Time Elapsed(Seconds)", y="Count", 
+         title="Dense vs Sparse Cholesky Decomposition(100 attempts)")
+```
+
+1d) Use the Cholesky decomposition of $Q$ to simulate a realization of $X$. Visualizse its empirical correlation function.
+
+```{R}
+library(geoR)
+cholL <- chol(Q.AR1(1000, 0.50, sparse=F))
+z <- rnorm(1000)
+x <- solve(t(cholL), z)
+va1 <- variog(coords=cbind(1:1000, rep(0,1000)), data=x,
+              breaks=seq(0, 50, 1))
+vafit1 <- variofit(va1, cov.model="matern", max.dist=50)
+plot(va1$u, va1$v, xlab="Distance", ylab="SemiVariance",
+     main="Matern Empirical Variance"); lines(vafit1)
+ecf <- acf(x)$acf[1:10,1,1]
+plot(0:9, ecf, xlab="Distance", ylab="Correlation"); lines((0:99)/10, .5^((0:99)/10))
+```
+
+1e) Use the Cholesky decomposition of $Q$ to simulate a realization of $X|Ax=c$, where $X ∼ \mathcal{N}(\mu; Q^{-1})$ and $Ax = c$ are $k$ linear constraints on $X$ with $A \in \mathbb{R}^{k×n}$, $k < n$;rank($A$) = $k$ and $c \in \mathbb{R}^k$.
+
+In this example We will execute a sum to zero constraint where $A = \mathbf{1}$ and $c = 0$
+
+```{R}
+set.seed(123)
+# execute a sum to zero constraint 
+Q <- Q.AR1(1000, 0.5, sparse=F)
+A <- matrix(1, nrow=1, ncol=1000)
+c_  <- 0
+cholL <- chol(Q)
+z <- rnorm(1000)
+x <- solve(t(cholL), z)
+V <- solve(Q) %*% t(A)
+W <- A %*% V
+U <- solve(W) %*% t(V)
+e_ <- (A %*% matrix(x, nrow=1000, ncol=1)) %>% c
+xstar <- x - c(U) * e_
+plot(1:1000, xstar, type="l", xlab="Time", ylab="Value", 
+     main="Constrained Simulation")
+```
+
+Verify that $Ax^* = c$
+```{R}
+all.equal(c((A %*% matrix(xstar, nrow=1000, ncol=1))), c_)
+```
+
+Verify that $\mu^* = E[X] = E[X|Ax=c]$
+```{R}
+cat(paste0("Sum of Simulated Values: ", sum(xstar)))
+```
+
+Verify that $\Sigma^* = \text{Var}[X^*] = \text{Var}[X|Ax=c]$
+```{R}
+all.equal(var(xstar), var(x))
+```
+
+Let $X$ be a GMRF with respect to a labeled graph $\mathcal{G} = (V; E)$ with mean $\mu$ and symmetric positive semidefinite precision matrix $Q$. Prove the following
+
+3a) $X_i \perp\!\!\!\perp X_j | x_{-ij} \Leftrightarrow Q_{ij} =0$
+
+Recall that the pdf of $x$ with mean 0 can be written as
+
+$$
+\pi (x) = (2\pi)^{\frac{-n}{2}}|Q^{-1}|^{-\frac{1}{2}}
+    \text{exp} \Big( -\frac{1}{2} \sum_{k,l} x_k Q_{k,l} x_l\Big) \\
+\propto \text{exp} \Big( -\frac{1}{2} \sum_{k,l} x_k Q_{k,l} x_l\Big)
+$$
+
+Using the theorm of conditional independence we can show.
+$$
+x \perp\!\!\!\perp y | z \Leftrightarrow f(x,z)g(y,z) \\
+\pi(x_i, x_j, x_{-ij}) \propto 
+    \text{exp} \Big( -\frac{1}{2} \sum_{k,l} x_k Q_{k,l} x_l\Big) \\
+\propto \text{exp} \Big( -\frac{1}{2} x_ix_j(Q_{i,j} + Q_{j,i})
+    -\frac{1}{2} \sum_{k,l \neq i,j} x_k Q_{k,l} x_l\Big)
+$$
+
+We see that only the left term in the equation involves the term $x_ix_j$ and since we can only account for the probability of the joint when these two terms are together when $Q_{i,j} \neq 0$ and by consruction $Q_{j,i} = Q_{i,j}$. It then follows in order for $x_i \perp\!\!\!\perp x_j | x_{-ij} \Leftrightarrow f(x_i,x_{-ij})g(x_j,x_{-ij})$ to hold then $Q_{i,j} = 0$.
+
+3b-c) $E[X_i|x_{-i}] = \mu_i - \frac{1}{Q_{ii}} \sum_{j:j~i} Q_{i,j}(x_j-\mu_j)~\&~\text{Prec}(x_i|x_{-i}) =Q_{ii}$
+
+Using the theorm of conditional independence and the structure of a GMRF we see 
+$$
+\pi(x_i | x_{-i}) \propto \text{exp}(-\frac{1}{2} (x_i - \mu_i)^2 Q_{ii} - (x_i - \mu_i) \sum_{j:j \sim i} Q_{ij}(x_j-\mu_j) ) \\
+$$
+
+using the univariate normal precision formulation of a distribution with mean $\mu$ and precision $\kappa$
+
+$$
+\text{exp}(-\frac{1}{2} \kappa x^2_i + \kappa x_i \mu)
+$$
+
+If we set $\boldsymbol{\mu} = 0$ then it follows that 
+
+$$
+\text{Prec}(x_i|x_{-i}) = Q_{ii} \\
+E[x_i | x_{-i}] = -\frac{1}{Q_{ii}} \sum_{j:j \sim i} Q_{ij}(x_j)
+$$
+as taken from the terms following the linear and quadratic terms of $x_i$. We can then add back on the mean and we arrive at 
+
+$$
+E[x_i | x_{-i}] = \mu_i-\frac{1}{Q_{ii}} \sum_{j:j \sim i} Q_{ij}(x_j-\mu_j)
+$$
+
+3d) $\text{Cor}(X_i,X_j|x_{-ij}) = \frac{-Q_{ij}}{\sqrt{Q_{ii}Q_{jj}}}$  
+
+If we consider the two by two covariance matrix then the inverse of a two by two
+matrix is 
+
+$$
+\\
+M= \begin{bmatrix}
+a & b \\
+c & d \\
+\end{bmatrix} \\
+$$
+$$
+M^{-1}= \frac{1}{\Delta}\begin{bmatrix}
+d & -b \\
+-c & a \\
+\end{bmatrix} \\
+$$
+$$
+\Delta = ad - bc \\
+\therefore \\
+$$
+$$
+Q= \begin{bmatrix}
+Q_{11} & Q_{21} \\
+Q_{12} & Q_{22} \\
+\end{bmatrix} \\
+$$
+$$
+Q^{-1}= \begin{bmatrix}
+\frac{Q_{22}}{\Delta} & -\frac{Q_{21}}{\Delta} \\
+-\frac{Q_{12}}{\Delta} & \frac{Q_{22}}{\Delta} \\
+\end{bmatrix} \\
+\Delta = Q_{11}Q_{22} - Q_{12}Q_{21} = Q_{11}Q_{22} - Q_{12}^2
+$$
+
+Using the definition of correlation from the covariance matrix we then can conlude...
+$$
+Corr(x_1, x_2) = \frac{\text{Cov}(x_1, x_2)}{\sqrt{\text{Var}(x_1)\text{Var}(x_2)}} \\
+= \frac{\Sigma_{1,2}}{\sqrt{\Sigma_{1,1} \Sigma_{2,2}}} \\
+= \frac{-\frac{Q_{12}}{\Delta}}{\sqrt{\frac{Q_{11}Q_{22}}{\Delta^2}}} \\
+= -\frac{Q_{12}}{\sqrt{Q_{11}Q_{22}}} \\
+\therefore \text{Corr}(x_i, x_j | x_{-ij}) = -\frac{Q_{ij}}{\sqrt{Q_{ii}Q_{jj}}}
+$$
+

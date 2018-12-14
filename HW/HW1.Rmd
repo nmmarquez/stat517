@@ -1,0 +1,100 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+
+1. Reproduce plots made in the first section.
+
+```{R}
+rm(list=ls())
+library(geoR)
+library(dplyr)
+library(ggplot2)
+elevation$coords %>% as.data.frame %>% 
+    mutate(data=elevation$data) %>%
+    mutate(quantr=cut(data, quantile(data), include.lowest=T)) %>%
+    mutate(quant=as.numeric(quantr)) %>%
+    write.csv("./elevation.csv", row.names=F)
+plot(elevation, lowess = T)
+```
+
+2. Suppose that $Y = (Y_1, \dots, Y_n)$ follows a mulrtivariate Gaussian Distribution with $\boldsymbol{E}[Y_i] = \mu$ and $\textbf{Var}[Y_i] = \sigma^2$ and that the covariance matrix of $Y$ can be expressed as $V = \sigma^2 R(\phi)$. Write down the log-likelihood function for $\theta = (\mu, \sigma^2, \phi)$ based on a a single realization of Yand obtain explicit expressions for the maximum likelihood estimators of $\mu$ and $\sigma^2$ when $\phi$ is known. Discuss how you would use these expressions to find the maximum likelihood estimators numerically when $\phi$ is unknown.
+
+$$
+\begin{align}
+p(Y | \mu,\sigma^2,\phi) & = \frac{\text{det}(R(\phi))^{\frac{1}{2}}}
+    {(2 \pi \sigma^2)^{\frac{n}{2}}} \text{exp}\Big(
+    \frac{-1}{2\sigma^2}(Y-J_{n,1}\mu)R(\phi)^{-1}(Y-J_{n,1}\mu)
+    \Big) \\
+\text{log}~ p( Y | \mu,\sigma^2,\phi) & = \frac{1}{2}\text{log}(\text{det}(R(\phi)))
+    - \frac{n}{2} \text{log}(2\pi\sigma^2) + 
+    \frac{-1}{2\sigma^2}(Y-J_{n,1}\mu)R(\phi)^{-1}(Y-J_{n,1}\mu) \\
+\hat{\mu} & = (J_{1,n} R(\phi) J_{n,1})^{-1} J_{1,n} R(\phi)Y \\
+\hat{\sigma}^2 &= n^{-1}(Y-J_{n,1}\hat{\mu})^T R(\phi)^{-1}(Y-J_{n,1}\hat{\mu})
+\end{align}
+$$
+
+```{R}
+library(Matrix)
+library(mvtnorm)
+library(ggplot2)
+library(dplyr)
+
+N <- 1000
+x <- runif(1000)
+A <- exp(-1 * abs(outer(x, x, "-")))
+sigma <- .4
+mu <- 7
+# simulate using a canned package
+Y <- t(rmvnorm(1, mean=rep(mu, N), sigma=sigma^2 * A))
+plot(x, Y)
+# estimate of mu
+muhat <- c(
+    solve(matrix(1, 1, N) %*% A %*% matrix(1, N, 1)) %*% 
+        (matrix(1, 1, N) %*% A %*% Y))
+
+# Estimate of sigma
+system.time(sigmahatslow <- (c(t(Y - muhat) %*% solve(A) %*% (Y - muhat)) / N)^.5)
+system.time(sigmahatfast <- (c(t(Y - muhat) %*% solve(A, Y - muhat)) / N)^.5)
+all.equal(sigmahatslow, sigmahatfast)
+```
+
+Consider the following method of simulating a realization of a one-dimensional spatial process on $S(x): x \in \mathbb{R}$, with mean 0 variance 1 and correlation function $\rho(u)$. Choose a set of points $x_i \in \mathbb{R} : i = 1, \dots, n$. Let $R$ denote the correlation matrix of $S = \{ S(x_1), \dots, S(x_n)\}$. Obtain the singular value decomposition of $R$ as $R = D \Lambda D^T$ where $\lambda$ is a diagnol matrix whose non-zero entries are the eigenvalues of R, in the order from largest to smallest. Let $Y = \{ Y_1, \dots Y_n\}$ be an independent random sample from the Gaussian distribution $\mathcal{N}(0,1)$. Then the simulated realization is $S = D \Lambda^{\frac{1}{2}}Y$.  
+
+Write an `R` function to simulate realizations using the above method for any specified set of points $x_i$ and a range of correlation functions of your choice. use your function to simulate a realization of S on the unit interval (0,1). Investigate how your realization of S changes when you replace the diagnal matrix $\lambda$ with a truncated form where you replace the last $k$ eigenvalues with 0.
+
+```{R}
+
+sim_vals <- function(n=NULL, 
+                     corr_function=function(x) exp(-1 * abs(outer(x, x, "-"))), 
+                     truncatedLambdas=0, x=NULL, y=NULL){
+    if(is.null(x) | is.null(y)){
+        x <- runif(n)
+        y <- rnorm(n)
+    }
+    R <- corr_function(x)
+    Rsvd <- svd(R)
+    U <- Rsvd$u
+    Lambda <- diag(Rsvd$d)
+    n <- length(x)
+    if(truncatedLambdas > 0){
+        lambda <- Rsvd$d
+        lambda[(n-truncatedLambdas+1):n] <- 0
+        Lambda <- diag(lambda)
+    }
+    S <- (U %*% Lambda^.5 %*% y) %>% as.vector
+    return(data.frame(x=x, Y=y, S=S))
+}
+
+# now reuse x and y but truncate eigen values 
+x <- runif(100)
+y <- rnorm(100)
+
+truncation <- seq(10, 90, 10)
+DFtruncate <- bind_rows(lapply(truncation, function(i) 
+    sim_vals(x=x, y=y, truncatedLambdas=i) %>% mutate(truncate=i)))
+ggplot(DFtruncate, aes(x=x, y=S)) + geom_line() + facet_wrap(~truncate) +
+    labs(title="1D SVD Simulation With N Truncated Eigenvalues")
+
+```
